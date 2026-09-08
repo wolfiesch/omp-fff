@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +6,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { resolveFffBinary } from "./binary.ts";
 
 const execFileAsync = promisify(execFile);
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -45,56 +45,6 @@ function throwIfAborted(signal: AbortSignal): void {
 function timeoutSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
-}
-
-function executableNames(): string[] {
-  return process.platform === "win32" ? ["fff-mcp.exe"] : ["fff-mcp"];
-}
-
-function pathCandidates(): string[] {
-  const entries = process.env.PATH?.split(path.delimiter).filter(Boolean) ?? [];
-  return entries.flatMap((entry) => executableNames().map((name) => path.join(entry, name)));
-}
-
-function installCandidates(): string[] {
-  const home = os.homedir();
-  const local = path.join(home, ".local", "bin", "fff-mcp");
-  if (process.platform === "darwin") {
-    return [
-      local,
-      path.join(home, ".cargo", "bin", "fff-mcp"),
-      "/opt/homebrew/bin/fff-mcp",
-      "/usr/local/bin/fff-mcp",
-    ];
-  }
-  if (process.platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA;
-    return [
-      ...(localAppData ? [path.join(localAppData, "fff", "fff-mcp.exe")] : []),
-      "C:\\Program Files\\fff\\fff-mcp.exe",
-    ];
-  }
-  return [local, path.join(home, ".cargo", "bin", "fff-mcp"), "/usr/local/bin/fff-mcp"];
-}
-
-function isExecutable(candidate: string): boolean {
-  if (!existsSync(candidate)) return false;
-  try {
-    if (!statSync(candidate).isFile()) return false;
-    accessSync(candidate, process.platform === "win32" ? constants.F_OK : constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function resolveFffBinary(): string {
-  for (const candidate of [...pathCandidates(), ...installCandidates()]) {
-    if (isExecutable(candidate)) return candidate;
-  }
-  throw new Error(
-    "fff-mcp is not installed or is not on PATH. Install fff, then make the fff-mcp executable available on PATH.",
-  );
 }
 
 function withoutGitOverrides(): NodeJS.ProcessEnv {
@@ -137,12 +87,12 @@ async function resolveGitWorktreeRoot(directory: string, signal: AbortSignal): P
 async function createSdkSession(root: string, signal: AbortSignal): Promise<FffSession> {
   throwIfAborted(signal);
   const transport = new StdioClientTransport({
-    command: resolveFffBinary(),
+    command: await resolveFffBinary(signal),
     args: ["--no-update-check", "--enable-home-scan=false", "--enable-root-scan=false", root],
     cwd: root,
     stderr: "ignore",
   });
-  const client = new Client({ name: "omp-fff", version: "0.1.0" });
+  const client = new Client({ name: "omp-fff", version: "0.2.0" });
   try {
     await client.connect(transport, {
       signal,
@@ -195,12 +145,14 @@ export class FffController {
     return this.#serialize(async () => {
       if (this.#shutDown) throw new Error("FFF controller has shut down.");
       if (signal?.aborted) throw abortError(signal);
-      const requestSignal = timeoutSignal(signal, SEARCH_TIMEOUT_MS);
-      throwIfAborted(requestSignal);
-      const root = await this.#resolveRoot(directory, requestSignal);
-      throwIfAborted(requestSignal);
+      // Provisioning has its own download/connect deadlines. A first install
+      // must not consume the subsequent MCP search's 30-second budget.
+      const setupSignal = signal ?? new AbortController().signal;
+      const root = await this.#resolveRoot(directory, setupSignal);
+      throwIfAborted(setupSignal);
       if (this.#shutDown) throw new Error("FFF controller has shut down.");
-      const session = await this.#sessionFor(root, requestSignal);
+      const session = await this.#sessionFor(root, setupSignal);
+      const requestSignal = timeoutSignal(signal, SEARCH_TIMEOUT_MS);
       try {
         return { root, result: await session.call(tool, input, requestSignal) };
       } catch (error) {

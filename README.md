@@ -18,15 +18,7 @@ src/profile-controller.ts
 
 ## Install
 
-Requires Git and an installed `fff-mcp` executable. FFF is a separate dependency; this extension never downloads or installs it automatically.
-
-**macOS or Linux with Homebrew:**
-
-```sh
-brew install dmtrKovalenko/fff/fff-mcp
-```
-
-Other installation methods are in the [FFF installation guide](https://github.com/dmtrKovalenko/fff#mcp-server). Put `fff-mcp` on `PATH`; standard user and Homebrew installation directories are also checked.
+Requires Git and an installed OMP or Pi host. Install the extension with one command:
 
 **Oh My Pi:**
 
@@ -45,6 +37,18 @@ Start a new session inside a Git repository and ask:
 > Use FFF to find the authentication files in this repository.
 
 No `mcp.json` entry is needed. Avoid registering a second standalone FFF server unless you intentionally want another index.
+
+### Automatic FFF installation
+
+On the first FFF search, the extension uses an existing `fff-mcp` from `PATH` or standard user/Homebrew installation directories. If none is available, it downloads the official **FFF 0.10.6** executable for your platform and verifies its pinned SHA-256 checksum and byte count before execution.
+
+- **Platforms:** macOS, Linux, and Windows on ARM64 or x64. Linux uses upstream's static musl binaries.
+- **Cache:** `~/.cache/omp-fff/0.10.6/`, shared by your sessions. Cached downloads are verified before reuse and work offline.
+- **No installation scripts:** works when npm or Bun blocks lifecycle scripts. No Homebrew, shell commands, administrator access, or global `PATH` changes are needed.
+- **Network:** the first uncached search requires access to GitHub release downloads. Loading the extension, checking status, and searches outside Git repositories never download a binary.
+- **Failures:** a failed or cancelled download leaves no executable in the cache. Checksum failures stop installation. A corrupt existing cache is left untouched; the error names the cached file to remove before retrying.
+
+For offline setup or unsupported platforms, install `fff-mcp` yourself using the [FFF installation guide](https://github.com/dmtrKovalenko/fff#mcp-server). Existing system binaries are neither replaced nor managed by this extension.
 
 ## Tools
 
@@ -81,7 +85,7 @@ FFF may broaden a zero-match content query into fuzzy suggestions. **Use native 
 
 Use `/fff` or `/fff status` to inspect the connection. `/fff stop` closes it; the next search can reconnect.
 
-Search and connection operations have bounded timeouts. Cancellation propagates to the MCP client. FFF's own startup update check is disabled; upgrades remain under your package manager's control.
+Binary downloads have a 60-second deadline. MCP connection and search operations each have a 30-second deadline; downloading does not consume the search deadline. Cancellation propagates through installation and MCP requests. FFF's startup update check is disabled. Automatic binaries stay pinned until an extension update changes the pin; system binaries remain under your package manager's control.
 
 Repository scoping is a search boundary, not an OS sandbox. FFF receives filesystem access under the same user account as the agent.
 
@@ -101,7 +105,11 @@ The same live-search smoke passed through each host's actual extension loader on
 | Pi (`@earendil-works/pi-coding-agent`) | 0.85.1 | Node 26.8.1 |
 | Legacy Pi (`@mariozechner/pi-coding-agent`) | 0.73.1 | Node 22.18.0 |
 
-The adapter also passed its direct smoke under Node 22.18.0. Other host versions and Windows have not been runtime-tested.
+The adapter also passed its direct smoke under Node 22.18.0. Automatic binary setup and offline cache reuse passed through OMP and Pi with system FFF binaries blocked by the macOS sandbox.[^platforms]
+
+[Linux x64 CI](https://github.com/wolfiesch/omp-fff/actions/workflows/ci.yml) verifies automatic binary download and the direct adapter's real-search smoke under Node 22 and Bun 1.3.14.
+
+[^platforms]: Other host/platform combinations, including Windows, have not been runtime-tested.
 
 ### How this differs from upstream pi-fff
 
@@ -118,9 +126,9 @@ bun run test
 bun run smoke
 ```
 
-The smoke command requires `fff-mcp` and Git. It creates temporary repositories, exercises real searches and lifecycle behavior, then removes only its own fixtures. It makes no model requests.
+The smoke command requires Git. It uses an existing `fff-mcp` or automatically downloads the pinned binary on first use. It creates temporary repositories, exercises real searches and lifecycle behavior, then removes only its own fixtures. The verified binary cache is retained. It makes no model requests.
 
-Unit tests cover connection ownership and lifecycle transitions. The live smoke covers fuzzy discovery, content search, ignored files, repository switching, concurrent calls, watcher updates, cancellation, errors, stop/reconnect, and shutdown.
+Unit tests cover binary verification, offline cache reuse, failed/cancelled downloads, concurrent installation, connection ownership, and lifecycle transitions. The live smoke covers fuzzy discovery, content search, ignored files, repository switching, concurrent calls, watcher updates, cancellation, errors, stop/reconnect, and shutdown.
 
 ## License and attribution
 
