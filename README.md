@@ -107,7 +107,9 @@ The same live-search smoke passed through each host's actual extension loader on
 
 The adapter also passed its direct smoke under Node 22.18.0. Automatic binary setup and offline cache reuse passed through OMP and Pi with system FFF binaries blocked by the macOS sandbox.[^platforms]
 
-[^platforms]: Other host versions, Linux, and Windows have not been runtime-tested.
+[Linux x64 CI](https://github.com/wolfiesch/omp-fff/actions/workflows/ci.yml) verifies automatic binary download and the direct adapter's real-search smoke under Node 22 and Bun 1.3.14.
+
+[^platforms]: Other host/platform combinations, including Windows, have not been runtime-tested.
 
 ### How this differs from upstream pi-fff
 
